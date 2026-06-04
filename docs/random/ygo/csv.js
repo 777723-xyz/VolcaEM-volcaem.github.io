@@ -59,6 +59,96 @@ import {
     clickHandler,
 } from './common.js';
 
+// ---------- FORMAT RULES PER GIOCO ----------
+export const formatRulesByGame = {
+    "Yu-Gi-Oh": {
+        "Default": { excludeTypes: [], allowedSetCodes: null, languageRule: null },
+        "Genesys": { excludeTypes: ["Link", "Pendulum"], allowedSetCodes: null, languageRule: null },
+        "GOAT": { excludeTypes: [], allowedSetCodes: null, languageRule: null },
+        "Edison": { excludeTypes: [], allowedSetCodes: null, languageRule: null },
+        "OCG": { excludeTypes: [], allowedSetCodes: null, languageRule: { type: "only", languages: ["JPN", "JP", "JA", "JAP", "AE", "KOR", "KR", "CHN", "ZH"] } },
+        "TCG": { excludeTypes: [], allowedSetCodes: null, languageRule: { type: "exclude", languages: ["JPN", "JP", "JA", "JAP", "AE", "KOR", "KR", "CHN", "ZH"] } }
+    },
+    // aggiungi altri giochi se necessario
+};
+
+// Format stuff
+
+export function extractSetCodeFromCardObj(card) {
+    const pack = (card.packId || card["Pack ID"] || "").toString().trim();
+    if (pack) return pack.toUpperCase();
+    const id = (card.id || card.ID || "").toString().trim();
+    const m = id.match(/^([A-Z0-9]+)-/i);
+    return m ? m[1].toUpperCase() : "";
+}
+
+export function cardSetInWhitelist(card, allowedSetCodes) {
+    if (!allowedSetCodes || allowedSetCodes.length === 0) return false;
+    const setCode = extractSetCodeFromCardObj(card).toUpperCase();
+    return allowedSetCodes.map(s => s.toUpperCase()).includes(setCode);
+}
+
+export function cardLanguageMatches(card, languageRule) {
+    if (!languageRule) return true;
+    const lang = (card.language || card.Language || "").toString().toUpperCase();
+    if (languageRule.type === "only") {
+        return languageRule.languages.map(l => l.toUpperCase()).includes(lang);
+    } else if (languageRule.type === "exclude") {
+        return !languageRule.languages.map(l => l.toUpperCase()).includes(lang);
+    }
+    return true;
+}
+
+export function isCardGoodForFormat(card, game, formatName, formatMap) {
+
+
+    if (formatName === "Default") {
+        return true;
+    }
+
+    if (card.rarity.toUpperCase().includes("FAKE") || card.rarity.toUpperCase().includes("FALSA")) {
+        return false;
+    }
+
+    // --- OVERRIDE COMPLETO PER EDISON E GOAT ---
+    if (game === "Yu-Gi-Oh") {
+        const name = card.name || card.Name || "";
+
+        if (formatName === "Edison") {
+            return formatMap[name] === true;
+        }
+
+        if (formatName === "GOAT") {
+            return formatMap[name] === true;
+        }
+    }
+
+
+    // --- TUTTO IL RESTO RIMANE COME PRIMA ---
+    const gameRules = formatRulesByGame[game] || {};
+    const rules = gameRules[formatName] || gameRules["Default"] || { excludeTypes: [], allowedSetCodes: null, languageRule: null };
+    const exclude = rules.excludeTypes || [];
+    const allowedSets = rules.allowedSetCodes || null;
+    const languageRule = rules.languageRule || null;
+
+    const typeStr = Array.isArray(card.type) ? card.type.join(" ") : (card.type || "");
+    if (exclude.some(exType => typeStr.includes(exType))) return false;
+
+    if (allowedSets) {
+        if (!cardSetInWhitelist(card, allowedSets)) return false;
+    }
+
+    if (rules.excludeSetCodes) {
+        const setCode = extractSetCodeFromCardObj(card);
+        if (rules.excludeSetCodes.includes(setCode)) return false;
+    }
+
+    if (!cardLanguageMatches(card, languageRule)) return false;
+
+    return true;
+}
+
+
 // Function to load CSV data and display cards
 export function loadCSVAndDisplayCards(myfile) {
 
@@ -89,15 +179,15 @@ export function loadCSVAndDisplayCards(myfile) {
         .catch(err => {
             console.error("Error loading CSV file:", err);
             const tbody = document.getElementById("cardBody");
-			if(tbody) {
-				tbody.innerHTML = "";
-				const tr = document.createElement("tr");
-				const td = document.createElement("td");
-				td.setAttribute("colspan", "15");
-				td.textContent = translations[langIndex]["csverror"];
-				tr.appendChild(td);
-				tbody.appendChild(tr);
-			}
+            if (tbody) {
+                tbody.innerHTML = "";
+                const tr = document.createElement("tr");
+                const td = document.createElement("td");
+                td.setAttribute("colspan", "15");
+                td.textContent = translations[langIndex]["csverror"];
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+            }
         });
 }
 
@@ -183,30 +273,46 @@ export function createStealthButton(label, mycards) {
 
 
 // Display cards in the table.
-export function displayCards(cards) {
+export async function displayCards(cards) {
     // Store a copy of the current displayed cards.
     setCurrentDisplayedCards(cards.slice());
 
     const tbody = document.getElementById("cardBody");
-	if(!tbody) {
-		return;
-	}
+    if (!tbody) {
+        return;
+    }
     tbody.innerHTML = "";
 
     logMessage(`isAndroidApp: ${isAndroidApp()}`);
 
     let filtered_cards = cards.slice();
 
-    if (currentGame == "Yu-Gi-Oh") {
-        let force_genesys = false;
-        let genesysCheckbox = document.getElementById("genesysCheckbox");
-        if (force_genesys || (genesysCheckbox && genesysCheckbox.checked)) {
-            // Exclude Link and Pendulum cards
-            filtered_cards = filtered_cards.filter(card =>
-                !card.type.includes("Link") && !card.type.includes("Pendulum")
-            );
+    const formatSelect = document.getElementById("formatSelect");
+    const selectedFormat = formatSelect ? formatSelect.value : "Default";
+
+    let myFormatMap = {};
+
+    if (currentGame === "Yu-Gi-Oh") {
+
+
+        if (selectedFormat === "Edison") {
+            const response = await fetch("edison-legal.json");
+            myFormatMap = await response.json();
+            console.log("Edison legal list loaded:", Object.keys(myFormatMap).length, "entries");
         }
+
+        if (selectedFormat === "GOAT") {
+            const response = await fetch("goat-legal.json");
+            myFormatMap = await response.json();
+            console.log("Goat legal list loaded:", Object.keys(myFormatMap).length, "entries");
+        }
+
+
     }
+
+    filtered_cards = filtered_cards.filter(card =>
+        isCardGoodForFormat(card, currentGame, selectedFormat, myFormatMap)
+    );
 
     let duplicateCheck = document.getElementById("duplicatesCheckbox");
     if (duplicateCheck) {
@@ -378,19 +484,19 @@ export function displayCards(cards) {
         let tdRarity = document.createElement("td");
         let fakestr = `<span class="badge badge-card-fake">` + (translations[langIndex]["fake"] || "FAKE") + `</span>`;
         let rarity_str = "Unknown";
-		if(card.rarity) {
-			rarity_str = (card.rarity.toLowerCase() == ((translations[0]["fake"] || "FAKE")
-				.toLowerCase()) ? fakestr : translations[langIndex][card.rarity.toLowerCase()
-				.trim()
-				.replaceAll(" ", "")
-			]);
-			
-			if(rarity_str && rarity_str.length > 0) {
-				rarity_str = rarity_str.replaceAll("——", "—").replaceAll("— ", "");
-			} else {
-				//console.log(card.name + ": weird rarity");
-			}
-		}
+        if (card.rarity) {
+            rarity_str = (card.rarity.toLowerCase() == ((translations[0]["fake"] || "FAKE")
+                .toLowerCase()) ? fakestr : translations[langIndex][card.rarity.toLowerCase()
+                .trim()
+                .replaceAll(" ", "")
+            ]);
+
+            if (rarity_str && rarity_str.length > 0) {
+                rarity_str = rarity_str.replaceAll("——", "—").replaceAll("— ", "");
+            } else {
+                //console.log(card.name + ": weird rarity");
+            }
+        }
         tdRarity.innerHTML = getRarityBadge(card.rarity, rarity_str);
 
 
@@ -427,13 +533,13 @@ export function displayCards(cards) {
         if (usetall_tr === true) tdEdition.classList.add("tall-tr");
         if (usesmall_tr === true) tdEdition.classList.add("small-tr");
         tr.appendChild(tdEdition);
-		
-		let have_min_price = false;
-		let min_price = 3;
-		
-		if(have_min_price && card.pricePaid.toFixed(2) < min_price) {
-			return;
-		}
+
+        let have_min_price = false;
+        let min_price = 3;
+
+        if (have_min_price && card.pricePaid.toFixed(2) < min_price) {
+            return;
+        }
 
         // Price I Paid.
         let tdPricePaid = document.createElement("td");
@@ -456,11 +562,11 @@ export function displayCards(cards) {
             .replaceAll("➡️", "")
             .replaceAll("None", "");
         let tdMarketPrice = document.createElement("td");
-		if (sellerMode) {
+        if (sellerMode) {
             tdMarketPrice.textContent = Math.max(Math.ceil(card.pricePaid * 3.85 * 10) / 10, 1).toFixed(2).toString();
         } else {
-			tdMarketPrice.textContent = card.marketPrice;
-		}
+            tdMarketPrice.textContent = card.marketPrice;
+        }
         if (nowrap_td === true) tdMarketPrice.classList.add("nowrap-td");
         if (usetall_tr === true) tdMarketPrice.classList.add("tall-tr");
         if (usesmall_tr === true) tdMarketPrice.classList.add("small-tr");
@@ -489,51 +595,51 @@ export function displayCards(cards) {
         tr.appendChild(tdPackID);
 
         const skip_before_2020 = false;
-		const skip_before_specific_date = false; // NEW optional flag
-		//const cutoffDate = new Date(2025, 10, 4); // JS months are 0‑indexed → 10 = November
-		const cutoffDate = new Date(2026, 2, 3); // JS months are 0‑indexed → 10 = November
+        const skip_before_specific_date = false; // NEW optional flag
+        //const cutoffDate = new Date(2025, 10, 4); // JS months are 0‑indexed → 10 = November
+        const cutoffDate = new Date(2026, 4, 3); // JS months are 0‑indexed → 10 = November
 
-		// Date Obtained.
-		if (card.dateObtained) {
+        // Date Obtained.
+        if (card.dateObtained) {
 
-			// Expecting dd/mm/YYYY
-			const parts = card.dateObtained.split("/");
-			if (parts.length === 3) {
-				const day = parseInt(parts[0], 10);
-				const month = parseInt(parts[1], 10) - 1; // JS months are 0‑indexed
-				const year = parseInt(parts[2], 10);
+            // Expecting dd/mm/YYYY
+            const parts = card.dateObtained.split("/");
+            if (parts.length === 3) {
+                const day = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10) - 1; // JS months are 0‑indexed
+                const year = parseInt(parts[2], 10);
 
-				const obtainedDate = new Date(year, month, day);
+                const obtainedDate = new Date(year, month, day);
 
-				// Skip this card if year < 2020
-				if (skip_before_2020 && year < 2020) {
-					return;
-				}
+                // Skip this card if year < 2020
+                if (skip_before_2020 && year < 2020) {
+                    return;
+                }
 
-				// NEW: Skip this card if obtained before 04/11/2025
-				if (skip_before_specific_date && obtainedDate < cutoffDate) {
-					return;
-				}
-			}
-		}
+                // NEW: Skip this card if obtained before 04/11/2025
+                if (skip_before_specific_date && obtainedDate < cutoffDate) {
+                    return;
+                }
+            }
+        }
 
-		let tdDate = document.createElement("td");
-		tdDate.textContent = card.dateObtained;
-		if (nowrap_td === true) tdDate.classList.add("nowrap-td");
-		if (usetall_tr === true) tdDate.classList.add("tall-tr");
-		if (usesmall_tr === true) tdDate.classList.add("small-tr");
-		if (sellerMode) {
-			tdDate.style.height = "0px";
-			tdDate.style.width = "0px";
-			tdDate.style.display = "none";
-			tdDate.style.opacity = "0%";
-		}
-		tr.appendChild(tdDate);
+        let tdDate = document.createElement("td");
+        tdDate.textContent = card.dateObtained;
+        if (nowrap_td === true) tdDate.classList.add("nowrap-td");
+        if (usetall_tr === true) tdDate.classList.add("tall-tr");
+        if (usesmall_tr === true) tdDate.classList.add("small-tr");
+        if (sellerMode) {
+            tdDate.style.height = "0px";
+            tdDate.style.width = "0px";
+            tdDate.style.display = "none";
+            tdDate.style.opacity = "0%";
+        }
+        tr.appendChild(tdDate);
 
-		let myspecifiedloc = "IP:M Album";
-		if (false && card.location.toLowerCase() != myspecifiedloc.toLowerCase()) {
-			return;
-		}
+        let myspecifiedloc = "IP:M Album";
+        if (false && card.location.toLowerCase() != myspecifiedloc.toLowerCase()) {
+            return;
+        }
 
         // Location.
         let tdLocation = document.createElement("td");

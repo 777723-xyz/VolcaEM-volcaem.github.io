@@ -56,6 +56,7 @@ import {
 
 import {
     displayCards,
+    formatRulesByGame
 } from './csv.js';
 
 ////////////////////////////////
@@ -198,37 +199,34 @@ export class CardManager {
                                     populateFilterTypeSelect(filterSelect, yugiohFilterOptions, key => translations[langIndex][key]);
                                     populateFilterTypeSelect(filterRarity, yugiohRarityOptions, key => translations[langIndex][key]);
 
+                                    // Create format select control (sostituisce genesys checkbox)
                                     let gsd = document.getElementById("gameSpecificDiv");
+                                    if (gsd) {
+                                        const formatControl = document.createElement('span');
+                                        formatControl.id = "formatControl";
 
-                                    // Create the wrapper span
-                                    const genesysControl = document.createElement('span');
-                                    genesysControl.id = "genesysControl";
+                                        const labelSpan = document.createElement('span');
+                                        labelSpan.setAttribute("data-translation-key", "selectFormat");
+                                        labelSpan.textContent = (translations && translations[langIndex] && translations[langIndex]["selectFormat"]) ? translations[langIndex]["selectFormat"] : "Formato";
 
-                                    // Create the checkbox
-                                    const checkbox = document.createElement('input');
-                                    checkbox.type = "checkbox";
-                                    checkbox.id = "genesysCheckbox";
-                                    checkbox.checked = false;
+                                        const select = document.createElement('select');
+                                        select.id = "formatSelect";
 
-                                    // Create the label span with translation key
-                                    const labelSpan = document.createElement('span');
-                                    const translationKey = "useGenesysFormat";
-                                    labelSpan.setAttribute("data-translation-key", translationKey);
+                                        const gameFormats = formatRulesByGame[currentGame] || { "Default": {} };
+                                        Object.keys(gameFormats).forEach(formatKey => {
+                                            const opt = document.createElement('option');
+                                            opt.value = formatKey;
+                                            const translationKey = `format_${formatKey}`;
+                                            opt.textContent = (translations && translations[langIndex] && translations[langIndex][translationKey]) ? translations[langIndex][translationKey] : formatKey;
+                                            select.appendChild(opt);
+                                        });
 
-                                    // Inject the translated text immediately
-                                    if (translations && translations[langIndex] && translations[langIndex][translationKey]) {
-                                        labelSpan.textContent = translations[langIndex][translationKey];
-                                    } else {
-                                        labelSpan.textContent = translationKey; // fallback
+                                        formatControl.appendChild(labelSpan);
+                                        formatControl.appendChild(document.createTextNode(" "));
+                                        formatControl.appendChild(select);
+                                        gsd.appendChild(formatControl);
                                     }
 
-                                    // Assemble the structure
-                                    genesysControl.appendChild(checkbox);
-                                    genesysControl.appendChild(document.createTextNode(" ")); // spacing
-                                    genesysControl.appendChild(labelSpan);
-
-                                    // Append to your target container
-                                    gsd.appendChild(genesysControl);
                                 }
                                 break;
 
